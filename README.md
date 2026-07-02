@@ -1,20 +1,51 @@
-# companion-surface-pixelhue-u5mini
+# Pixelhue U5 Mini
 
-Pixelhue U5 Mini 的 Companion 4.3 **Surface 模块**（独立包 + 子进程 + plugin 出站）。
+Companion is primarily intended to be used with the **Pixelhue U5 Mini** control surface.
 
-## 开发与构建（与 `companion-surface-elgato-stream-deck` 一致）
+This module connects to the U5 Mini over TCP, maps physical keys to Companion's button grid, displays button images on the device, and receives key press and release events.
 
-1. 在本目录执行 `yarn` 安装依赖。
-2. `yarn build`：将 `src/main.ts` 编译到 `dist/main.js`。
-3. `yarn package`：先 `build`，再运行 `companion-surface-build` 生成可导入 Companion 的模块包（与官方 surface 模块流程一致）。
+## Supported Device
 
-`companion/manifest.json` 中 `runtime.entrypoint` 为 `../dist/main.js`，主机从模块根目录解析，因此发布或拷贝模块时需包含 **`companion/` 与 `dist/`**（或由 `companion-surface-build` 产出的完整包）。
+We currently support the following model:
 
-## 安装到 Companion
+- **Pixelhue U5 Mini**
 
-将构建/打包产物（或 `yarn package` 生成的 `.tgz`）通过 Companion 的 Surface 模块导入流程安装；在 Companion 中新建 **Surface 实例**，选择模块 **pixelhue-u5-mini**。
+The U5 Mini connects over the network (TCP), not USB. It must be added under **Remote Surfaces** in Companion.
 
-## 说明
+## Layout
 
-- **已实现**：`init` / `destroy`、通过 `SurfacePluginRemote`（`PixelhueRemote`）提供出站配置字段与 `startConnections` / `stopConnections`、发现、`setupRemoteConnections` 内建 TCP、`notifyOpenedDiscoveredSurface`、`draw` / `blankSurface` / `closeDevice`、按键通过 `surfaceEvents` 上报。
-- **依赖**：`@pixelhue/event-controller-sdk`（TCP 与发现）。
+The U5 Mini presents as a **10×4** button grid (40 keys total).
+
+## Installation
+
+Before you can add a U5 Mini, install and enable this surface module in Companion:
+
+1. Open the Companion web UI.
+2. In the left sidebar, go to **Surfaces**.
+3. Click **Add Surface Integration** , and add the `Pixelhue U5 Mini`.
+
+## Adding a U5 Mini in Companion
+
+1. Open the Companion web UI.
+2. In the left sidebar, click **Surfaces**.
+3. Open the **Remote Surfaces** tab.
+
+### Discover Surfaces
+
+Discovery automatically finds all U5 Mini devices on your local network.
+
+On the **Remote Surfaces** page, discovered devices appear in the **Discover Surfaces** panel on the right. Click a discovered U5 Mini to add it directly.
+
+### Remote Surfaces (manual)
+
+To add a device manually, use the **Remote Surfaces** panel on the left and create a new remote surface connection. Select the **pixelhue-u5-mini** module and fill in the fields below:
+
+| Field          | Description            |
+| -------------- | ---------------------- |
+| **Name**       | Device name            |
+| **IP Address** | Device IP address      |
+| **Port**       | Default value: `17100` |
+
+## Notes
+
+The U5 Mini can have only one Companion connection at a time. The connection established later takes precedence, and the previous connection is automatically disconnected.

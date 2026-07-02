@@ -18,19 +18,18 @@ export class PixelhueRemote
 {
 	readonly configFields: SomeCompanionInputField[] = remoteConfigFields
 
-	// 用于 “Already added” 去重匹配
+	// Used for "Already added" deduplication matching
 	readonly checkConfigMatchesExpression = remoteCheckConfigMatchesExpression
 
 	/**
-	 * 通过闭包拿到当前 moduleInstance，用于转发 host 的 start/stop。
+	 * Resolve the current moduleInstance via closure to forward host start/stop calls.
 	 */
 	constructor(private readonly getModuleInstance: () => PixelhueSurfaceModule | null) {
 		super()
 	}
 	rejectSurface(): void {}
 	/**
-	 * 宿主启动指定 connection 时调用：
-	 * 透传到 moduleInstance.setupRemoteConnections。
+	 * Called when the host starts connections; forwards to moduleInstance.setupRemoteConnections.
 	 */
 	async startConnections(connectionInfos: RemoteSurfaceConnectionInfo[]): Promise<void> {
 		const moduleInstance = this.getModuleInstance()
@@ -39,8 +38,7 @@ export class PixelhueRemote
 	}
 
 	/**
-	 * 宿主停止指定 connection 时调用：
-	 * 透传到 moduleInstance.stopRemoteConnections。
+	 * Called when the host stops connections; forwards to moduleInstance.stopRemoteConnections.
 	 */
 	async stopConnections(connectionIds: string[]): Promise<void> {
 		const moduleInstance = this.getModuleInstance()
