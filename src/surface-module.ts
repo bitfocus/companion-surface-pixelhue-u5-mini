@@ -19,34 +19,34 @@ class PixelhueSurfaceModule {
 	readonly #logger = createModuleLogger('PixelhueSurfaceModule')
 	readonly #context: HostContext
 	#discovery: any = null
-	/** surfaceId（endpoint级）-> OpenConnection */
+	/** surfaceId (per endpoint) -> OpenConnection */
 	#openConnections = new Map<string, OpenConnection>()
 	/** connectionId -> address:port */
 	#activeConnections = new Map<string, string>()
-	/** address:port -> 引用计数 */
+	/** address:port -> reference count */
 	#connectionRefCounts = new Map<string, number>()
-	/** address:port -> 共享的已建立连接 */
+	/** address:port -> shared established connection */
 	#sharedConnections = new Map<string, OpenConnection>()
-	/** address:port -> 建连中的 Promise（防止并发重复 connectTo） */
+	/** address:port -> in-flight connect Promise (prevents concurrent duplicate connectTo) */
 	#connectingPromises = new Map<string, Promise<void>>()
-	/** address:port -> surfaceId（endpoint级唯一） */
+	/** address:port -> surfaceId (unique per endpoint) */
 	#surfaceIdByAddress = new Map<string, string>()
 	/** surfaceId -> address:port */
 	#addressBySurfaceId = new Map<string, string>()
-	/** 每个 connectionId 只通知一次 opened */
+	/** Each connectionId is only notified as opened once */
 	#openedSurfaceIds = new Set<string>()
 
 	/**
-	 * 构造函数：持有宿主上下文，用于上报 discovery 候选、设备打开结果、按键事件等。
+	 * Constructor: holds host context for reporting discovery candidates, opened devices, and key events.
 	 */
 	constructor(hostContext: HostContext) {
 		this.#context = hostContext
 	}
 
 	/**
-	 * 初始化模块：
-	 * 1) 创建 TCP 连接管理器，用于建立出站连接；
-	 * 2) 启动（可选）mDNS/Bonjour discovery，将发现的设备转换为候选连接上报给宿主。
+	 * Initialize the module:
+	 * 1) prepare TCP connection management for outbound connections;
+	 * 2) start mDNS/Bonjour discovery and report discovered devices to the host.
 	 */
 	async init(): Promise<void> {
 		this.#discovery = null
@@ -63,8 +63,7 @@ class PixelhueSurfaceModule {
 	}
 
 	/**
-	 * 销毁模块：
-	 * 销毁 discovery 实例、关闭所有已打开连接。
+	 * Destroy the module: tear down discovery and close all open connections.
 	 */
 	async destroy(): Promise<void> {
 		this.#discovery?.destroy?.()
@@ -87,8 +86,8 @@ class PixelhueSurfaceModule {
 	}
 
 	/**
-	 * 启用 outbound 连接时建立 TCP 连接。
-	 * 规则：模块内部不主动断开已经建立的连接，仅为未打开的 connectionId 建连。
+	 * Establish TCP connections when outbound connections are enabled.
+	 * Does not proactively disconnect existing sockets; only connects connectionIds that are not open yet.
 	 */
 	async setupRemoteConnections(connectionInfos: RemoteSurfaceConnectionInfo[]): Promise<void> {
 		this.#logger.debug(`connectionInfos: ${JSON.stringify(connectionInfos)}`)
@@ -108,22 +107,22 @@ class PixelhueSurfaceModule {
 			this.#surfaceIdByAddress.set(addressKey, surfaceId)
 			this.#addressBySurfaceId.set(surfaceId, addressKey)
 
-			// 无实际变化的更新
+			// No effective change
 			const oldAddressKey = this.#activeConnections.get(connectionId)
 			if (oldAddressKey === addressKey) continue
 
-			// 若 connectionId 已存在但目标地址不同，先释放旧引用
+			// Release old reference if target address changed
 			if (oldAddressKey !== undefined) {
 				this.#releaseConnectionReference(connectionId, oldAddressKey)
 			}
 
-			// 记录 connectionId -> addressKey 的映射
+			// Record connectionId -> addressKey mapping
 			this.#activeConnections.set(connectionId, addressKey)
 
 			const currentRefCount = this.#connectionRefCounts.get(addressKey) ?? 0
 			this.#connectionRefCounts.set(addressKey, currentRefCount + 1)
 
-			// 若该 address:port 已连接，则复用同一条 socket，并通过 connectionId 进行别名
+			// Reuse existing socket for this address:port
 			const existingShared = this.#sharedConnections.get(addressKey)
 			if (existingShared) {
 				this.#openConnections.set(surfaceId, existingShared)
@@ -143,7 +142,7 @@ class PixelhueSurfaceModule {
 						this.#notifyOpenedSurface(surfaceId, address, port)
 					}
 				} else {
-					// 并发等待的建连失败，回滚本次预先增加的映射与引用计数
+					// Roll back mapping and ref count on concurrent connect failure
 					this.#releaseConnectionReference(connectionId, addressKey)
 				}
 				continue
@@ -159,7 +158,7 @@ class PixelhueSurfaceModule {
 				await connectPromise
 			} catch (error: unknown) {
 				this.#logger.error(`Failed to connect to ${address}:${port}: ${JSON.stringify(error)}`)
-				// 连接失败，回滚引用计数等记录
+				// Roll back ref count and related state on connection failure
 				this.#releaseConnectionReference(connectionId, addressKey)
 			} finally {
 				this.#connectingPromises.delete(addressKey)
@@ -168,8 +167,7 @@ class PixelhueSurfaceModule {
 	}
 
 	/**
-	 * 停止指定远程连接：
-	 * 关闭对应的 socket/连接并清理内部状态。
+	 * Stop remote connections: close sockets and clean up internal state.
 	 */
 	async stopRemoteConnections(connectionIds: string[]): Promise<void> {
 		const dedupedConnectionIds = new Set(connectionIds)
@@ -181,8 +179,7 @@ class PixelhueSurfaceModule {
 	}
 
 	/**
-	 * 关闭某个 surface：
-	 * 当宿主明确关闭 surface 时，关闭对应连接。
+	 * Close a surface: called when the host explicitly closes a surface.
 	 */
 	async closeDevice(surfaceId: string): Promise<void> {
 		const addressKey = this.#addressBySurfaceId.get(surfaceId)
@@ -197,9 +194,8 @@ class PixelhueSurfaceModule {
 	}
 
 	/**
-	 * 绘制（draw）：
-	 * 将宿主传入的绘制请求入队列，并通过 #drainDrawQueue 顺序发送给设备，
-	 * 防止短时间内大量发送造成卡顿/内存积压。
+	 * Draw: enqueue host draw requests and send sequentially via #drainDrawQueue
+	 * to avoid lag and memory buildup under bursty updates.
 	 */
 	async draw(
 		surfaceId: string,
@@ -240,35 +236,25 @@ class PixelhueSurfaceModule {
 		this.#drainDrawQueue(surfaceId)
 	}
 
-	/**
-	 * blank：清屏
-	 */
+	/** Blank the surface */
 	async blankSurface(_surfaceId: string): Promise<void> {}
 
-	/**
-	 * setBrightness：当前协议未实现，保留接口空实现。
-	 */
+	/** Not implemented in current protocol; kept as a no-op stub */
 	async setBrightness(_surfaceId: string, _brightness: number): Promise<void> {}
 
-	/**
-	 * showStatus：当前协议未实现，保留接口空实现。
-	 */
+	/** Not implemented in current protocol; kept as a no-op stub */
 	async showStatus(_surfaceId: string): Promise<void> {}
 
-	/**
-	 * onVariableValue：output variable 更新。
-	 */
+	/** Output variable updates */
 	async onVariableValue(_surfaceId: string, _name: string, _value: unknown): Promise<void> {}
 
 	/**
-	 * showLockedStatus：locked 状态展示。
-	 * 本模块当前不使用 locked 状态，保留接口空实现。
+	 * Locked-state display. Not used by this module; kept as a no-op stub.
 	 */
 	async showLockedStatus(_surfaceId: string, _locked: boolean, _characterCount: number): Promise<void> {}
 
 	/**
-	 * TCP 连接建立后回调：
-	 * 绑定 socket 事件（data/disconnected/error），并向宿主上报该远程 surface 已打开。
+	 * TCP connected callback: bind socket events and report the remote surface as opened.
 	 */
 	#onConnected({
 		surfaceId,
@@ -301,7 +287,7 @@ class PixelhueSurfaceModule {
 			} catch {
 				// ignore disconnect errors during close
 			}
-			// 删除所有指向该 endpoint 的别名连接
+			// Remove all alias connections pointing at this endpoint
 			for (const [id, key] of this.#activeConnections.entries()) {
 				if (key === addressKey) {
 					this.#activeConnections.delete(id)
@@ -332,13 +318,13 @@ class PixelhueSurfaceModule {
 		socketWrapper.on?.('connected', () => {
 			this.#notifyOpenedSurface(surfaceId, address, port)
 
-			// If there are queued draw items, try draining now.
+			// If there are queued draw items, try draining now
 			if (conn.drawQueue.length > 0) {
 				this.#drainDrawQueue(surfaceId)
 			}
 		})
 
-		// 某些实现里 connectTo 返回时可能已经 connected，兜底补发 opened。
+		// Some implementations may already be connected when connectTo returns; emit opened as a fallback
 		if (socketWrapper?.isConnected?.()) {
 			this.#notifyOpenedSurface(surfaceId, address, port)
 			if (conn.drawQueue.length > 0) {
@@ -368,8 +354,7 @@ class PixelhueSurfaceModule {
 	}
 
 	/**
-	 * 处理来自设备的原始数据，并转换为宿主的输入事件：
-	 * - 按键 press/release => inputPress
+	 * Handle raw device data and convert to host input events: key press/release => inputPress
 	 */
 	#handleDeviceData(surfaceId: string, data: Record<string, unknown>): void {
 		try {
@@ -392,7 +377,8 @@ class PixelhueSurfaceModule {
 	}
 
 	/**
-	 * 同一个 address:port 只建立一条底层连接,多个 connectionId 可以引用同一条底层连接,关闭其中一个 connectionId 只减引用计数, 只有引用归0时才真正断开 socket
+	 * Only one underlying connection per address:port. Multiple connectionIds may share the same socket;
+	 * the socket is disconnected only when the ref count reaches zero.
 	 */
 	#releaseConnectionReference(connectionId: string, addressKey: string): void {
 		this.#activeConnections.delete(connectionId)
@@ -411,8 +397,7 @@ class PixelhueSurfaceModule {
 	}
 
 	/**
-	 * 从绘制队列中逐条发送到设备：
-	 * 每次只发送一个，然后用 setImmediate 触发下一次，避免一次性阻塞。
+	 * Send draw queue items one at a time, scheduling the next send with setImmediate to avoid blocking.
 	 */
 	#drainDrawQueue(surfaceId: string): void {
 		const conn = this.#openConnections.get(surfaceId)
@@ -426,7 +411,7 @@ class PixelhueSurfaceModule {
 				return
 			}
 			const sdkConnected = !!c.socketWrapper?.isConnected?.()
-			// 保护机制，防止连接丢失后，drawQueueRunning 一直为 true，导致内存泄漏
+			// Guard against drawQueueRunning staying true after connection loss, which would leak memory
 			if (!sdkConnected) {
 				c.waitingSinceMs ??= Date.now()
 				if (Date.now() - c.waitingSinceMs > CONNECT_WAIT_TIMEOUT_MS) {
@@ -441,7 +426,7 @@ class PixelhueSurfaceModule {
 			c.waitingSinceMs = undefined
 			const item = c.drawQueue.shift()
 			if (!item) {
-				c.drawQueueRunning = false
+				conn.drawQueueRunning = false
 				return
 			}
 
@@ -466,9 +451,7 @@ class PixelhueSurfaceModule {
 		sendOne()
 	}
 
-	/**
-	 * 生成连接/表面使用的唯一 id：
-	 */
+	/** Generate a unique id for connections/surfaces */
 	#connectionId(device: DeviceInfoT): string {
 		return `${PIXELHUE_U5_MINI_NAME}-${device.serialNumber ?? `${PIXELHUE_U5_MINI_NAME}_${device.address}_${device.port}`}`
 	}
@@ -477,9 +460,7 @@ class PixelhueSurfaceModule {
 		return `${PIXELHUE_U5_MINI_NAME}:${address}:${port}`
 	}
 
-	/**
-	 * 把 discovery 得到的 device 信息转换成宿主可展示的“发现候选”结构。
-	 */
+	/** Convert a discovered device into a host-facing discovery candidate */
 	#toDiscoveredInfo(device: DeviceInfoT): DiscoveredRemoteSurfaceInfo {
 		const id = this.#connectionId(device)
 		const address = device.address ?? null
@@ -495,15 +476,28 @@ class PixelhueSurfaceModule {
 		}
 	}
 
-	/**
-	 * 向宿主上报 discovery 候选连接列表（connectionsFound）。
-	 */
+	/** Report discovery candidates to the host (connectionsFound) */
 	#reportDiscovered(infos: DiscoveredRemoteSurfaceInfo[]): void {
 		this.#context.connectionsFound(infos)
 	}
 
 	#notifyOpenedSurface(surfaceId: string, address: string, port: number): void {
-		if (this.#openedSurfaceIds.has(surfaceId)) return
+		// SDK TcpWrapper: with autoReconnect on 127.0.0.1, socket close may reconnect without emitting
+		// `disconnected`, but `connected` fires again. "Notify opened only once" would skip full page redraw.
+		if (this.#openedSurfaceIds.has(surfaceId)) {
+			// Loopback only: matches outbound "still enabled on 127.0.0.1"; main process re-validates the outbound entry
+			if (address !== '127.0.0.1') {
+				return
+			}
+			// Same shape as IpcWrapper.sendWithNoCb; child entry requires process.send; ?. avoids throws outside a child process
+			process?.send?.({
+				direction: 'call',
+				name: 'requestRemoteSurfaceRedraw',
+				payload: { surfaceId },
+				callbackId: undefined,
+			})
+		}
+
 		this.#openedSurfaceIds.add(surfaceId)
 
 		const info: OpenDeviceResult = {

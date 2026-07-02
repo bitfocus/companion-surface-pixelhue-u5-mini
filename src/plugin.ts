@@ -36,8 +36,7 @@ function disconnectContext(surfaceId: string): void {
 const plugin: SurfacePlugin<PixelhueRemoteDeviceInfo> = {
 	remote,
 	/**
-	 * SurfacePlugin 初始化：
-	 * 创建 moduleInstance，并注入宿主上下文（用于桥接 discovery 与输入事件）。
+	 * SurfacePlugin init: create moduleInstance and inject host context (discovery bridge and input events).
 	 */
 	async init(): Promise<void> {
 		if (moduleInstance) return
@@ -75,8 +74,7 @@ const plugin: SurfacePlugin<PixelhueRemoteDeviceInfo> = {
 		await moduleInstance.init()
 	},
 	/**
-	 * SurfacePlugin 销毁：
-	 * 销毁 moduleInstance，并清理 surfaceContexts。
+	 * SurfacePlugin destroy: tear down moduleInstance and clear surfaceContexts.
 	 */
 	async destroy(): Promise<void> {
 		if (!moduleInstance) return
@@ -85,8 +83,7 @@ const plugin: SurfacePlugin<PixelhueRemoteDeviceInfo> = {
 		surfaceContexts.clear()
 	},
 	/**
-	 * 打开一个 surface：
-	 * 创建给宿主调用的 surface API，并将宿主的 draw/close/变量等操作转发到 moduleInstance。
+	 * Open a surface: expose the surface API to the host and forward draw/close/variable calls to moduleInstance.
 	 */
 	async openSurface(
 		surfaceId: string,
@@ -98,20 +95,20 @@ const plugin: SurfacePlugin<PixelhueRemoteDeviceInfo> = {
 		const surface = {
 			surfaceId,
 			productName: PIXELHUE_U5_MINI_NAME,
-			/** surface 初始化（本模块无额外初始化动作） */
+			/** Surface init (no extra setup for this module) */
 			async init(): Promise<void> {},
-			/** surface 关闭：移除 context 并关闭底层连接。 */
+			/** Surface close: remove context and close the underlying connection. */
 			async close(): Promise<void> {
 				disconnectContext(surfaceId)
 				await moduleInstance?.closeDevice(surfaceId)
 			},
 			async updateConfig(_config: Record<string, unknown>): Promise<void> {},
 			async ready(): Promise<void> {},
-			/** blank：清屏 */
+			/** Blank the surface */
 			async blank(): Promise<void> {
 				await moduleInstance?.blankSurface(surfaceId)
 			},
-			/** draw：将宿主的 draw props 转成 moduleInstance.draw 的参数格式。 */
+			/** Draw: map host draw props to moduleInstance.draw parameters. */
 			async draw(signal: AbortSignal, props: SurfaceDrawProps): Promise<void> {
 				if (signal.aborted) return
 				if (!props?.controlId) return
@@ -125,17 +122,17 @@ const plugin: SurfacePlugin<PixelhueRemoteDeviceInfo> = {
 					},
 				])
 			},
-			/** 接收变量更新并转发到 moduleInstance */
+			/** Forward variable updates to moduleInstance */
 			async onVariableValue(name: string, value: unknown): Promise<void> {
 				await moduleInstance?.onVariableValue(surfaceId, name, value)
 			},
-			/** 锁定状态展示 */
+			/** Locked-state display */
 			async showLockedStatus(locked: boolean, characterCount: number): Promise<void> {
 				await moduleInstance?.showLockedStatus(surfaceId, locked, characterCount)
 			},
-			/** 亮度：设备协议未实现，与 registerProps.brightness=false 一致 */
+			/** Brightness: not implemented; matches registerProps.brightness=false */
 			async setBrightness(_brightness: number): Promise<void> {},
-			/** 状态图：本 surface 不使用 Satellite 式状态卡 */
+			/** Status card: no Satellite-style status cards */
 			async showStatus(_signal: AbortSignal, _cardGenerator: CardGenerator, _statusMessage: string): Promise<void> {},
 		}
 
