@@ -1,6 +1,6 @@
 {
 	"name": "companion-surface-pixelhue-u5mini",
-	"version": "1.0.6",
+	"version": "1.0.5",
 	"description": "Pixelhue U5 Mini surface module for Companion 4.3",
 	"main": "dist/main.js",
 	"type": "module",
